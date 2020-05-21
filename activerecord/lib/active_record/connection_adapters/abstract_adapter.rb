@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "set"
 require "active_record/connection_adapters/determine_if_preparable_visitor"
 require "active_record/connection_adapters/schema_cache"
 require "active_record/connection_adapters/sql_type_metadata"
@@ -77,7 +78,7 @@ module ActiveRecord
       SIMPLE_INT = /\A\d+\z/
 
       attr_accessor :visitor, :pool
-      attr_reader :schema_cache, :owner, :logger, :prepared_statements, :lock
+      attr_reader :schema_cache, :owner, :logger, :lock
       alias :in_use? :owner
 
       def self.type_cast_config_to_integer(config)
@@ -127,6 +128,14 @@ module ActiveRecord
 
       def migration_context # :nodoc:
         MigrationContext.new(migrations_paths)
+      end
+
+      def prepared_statements
+        @prepared_statements && !prepared_statements_disabled_cache.include?(object_id)
+      end
+
+      def prepared_statements_disabled_cache # :nodoc:
+        Thread.current[:ar_prepared_statements_disabled_cache] ||= Set.new
       end
 
       class Version
@@ -202,10 +211,10 @@ module ActiveRecord
       end
 
       def unprepared_statement
-        old_prepared_statements, @prepared_statements = @prepared_statements, false
+        cache = prepared_statements_disabled_cache.add(object_id) if @prepared_statements
         yield
       ensure
-        @prepared_statements = old_prepared_statements
+        cache&.delete(object_id)
       end
 
       # Returns the human-readable name of the adapter. Use mixed case - one
